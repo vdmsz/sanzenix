@@ -137,6 +137,43 @@ behavior belongs under `Zenix/Games/SanAurie`. The shared UI is included by the
 core artifact; do not add a second game-local UI unless a target explicitly
 uses a different `ui_path`.
 
+### Shared teleport API
+
+Zenix owns the low-level `TeleportService` module. Use
+`TeleportService:Teleport(target, destinationCFrame)` for an instant move of a
+`BasePart` or `Model` target. Models are moved with `PivotTo`, while parts are
+moved with `CFrame`. Pass a positive third argument to `Teleport` to tween
+instead, or call
+`TeleportService:TweenTeleport(target, destinationCFrame, duration, easingStyle, easingDirection)`
+directly. Tweening defaults to linear easing with an `InOut` direction. Both
+methods return `true` on success or `false, errorMessage` when arguments are
+invalid; tweening also returns the started Tween as the second result. Game
+modules remain responsible for destination lookup, offsets, collision/floor
+handling, and any game-specific vehicle policy.
+
+San Aurie teleport modules use `TeleportByDistance` by default through the
+`DestinationTeleport:TeleportToDestination(targetCFrame)` wrapper. Passing an
+explicit duration still uses a fixed-duration tween:
+`DestinationTeleport:TeleportToDestination(targetCFrame, duration)`.
+
+For distance-aware movement, use
+`TeleportService:TeleportByDistance(target, destinationCFrame, options)`.
+With the defaults, targets within 100 studs move instantly; a 1,000-stud
+distance takes 3 seconds; and longer distances continue on the same linear
+curve. Configure the curve with `InstantDistance`, `FullTweenDistance`, and
+`FullTweenDuration`, and optionally provide `EasingStyle` and
+`EasingDirection`. The method returns
+`true, tweenOrNil, duration, distance` on success or
+`false, errorMessage, duration, distance` on failure.
+Tween calls yield until the tween completes. If another tween is already
+running for the same target, a new tween request waits for that active tween
+to finish before starting.
+When the tween target is a character model, the service leaves its
+`BasePart` descendants unanchored and checks their linear and angular velocity
+each heartbeat. A velocity is reset only when its magnitude exceeds 50, which
+prevents extreme spinning and accumulated physics velocity without changing
+the character's anchored state.
+
 ### Local builds
 
 Run commands from the repository root:
