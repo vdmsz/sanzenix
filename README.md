@@ -267,6 +267,138 @@ The factory is called after declared dependencies are resolved. Use
 in the returned table or local variables; do not publish setup state directly
 through the global registry.
 
+### Core service API
+
+Core services are exposed through `_G.ZenixRegistry` after the core component
+has loaded. Check for the service before using it when a module can run in
+different loading modes.
+
+#### FileSystemManager
+
+`FileSystemManager` centralizes runtime file access and returns
+`success, valueOrError`:
+
+```lua
+local fs = _G.ZenixRegistry.FileSystemManager
+
+local ready, errorMessage = fs:EnsureFolders("Zenix/Cache")
+if not ready then
+    error(errorMessage)
+end
+
+local exists, kind = fs:Exists("Zenix/Cache/state.json")
+local readOk, contents = fs:Read("Zenix/Cache/state.json")
+if readOk then
+    print(contents)
+end
+
+fs:Write("Zenix/Cache/state.json", "{}")
+fs:Append("Zenix/Logs/custom.log", "started\n")
+```
+
+Available operations include `IsAvailable`, `Exists`, `EnsureFolder`,
+`EnsureFolders`, `Read`, `Write`, `Append`, `Delete`, `List`, and `Path`.
+Prefer this service over calling executor file functions directly.
+
+#### EventConnectionManager
+
+Modules receive `EventConnectionManager` through
+`context:getDependency("EventConnectionManager")`. Use managed subscriptions
+so callbacks and periodic tasks can be disconnected when a module stops:
+
+```lua
+local events = context:getDependency("EventConnectionManager")
+
+local subscription = events:InstallRunService("Heartbeat", function(deltaTime)
+    updateFeature(deltaTime)
+end)
+
+-- In the module's Stop or cleanup function:
+events:Disconnect(subscription)
+```
+
+Other helpers are `InstallUserInputService`,
+`InstallInstanceSignal(instance, eventName, callback)`, and
+`InstallPeriodic(name, interval, callback)`. Periodic intervals must meet the
+manager's minimum interval. `GetConnections()` and `Cleanup()` are useful when
+diagnosing or shutting down a module.
+
+#### InstanceManager and GameModuleManager
+
+Use `InstanceManager` to track created or cloned Roblox instances:
+
+```lua
+local instances = _G.ZenixRegistry.InstanceManager
+local folder = instances:Create("Folder", workspace)
+instances:Track(folder)
+
+-- Releases tracked instances during module cleanup.
+instances:Cleanup()
+```
+
+`GameModuleManager` provides game-module access through `Get(modulePath)`,
+`Require(modulePath)`, `Clear(modulePath)`, `GetRoot()`, and `Cleanup()`.
+Prefer it over creating a second module-loading mechanism.
+
+#### Localization and compatibility
+
+```lua
+local localization = _G.ZenixRegistry.Localization
+local text = localization:T("Home")
+local languageOk, languageError = localization:SetLanguage("en", true)
+
+local compatibility = _G.ZenixRegistry.GameCompatibility
+local refreshed, refreshError = compatibility:Refresh(game.GameId, game.PlaceId)
+local status = compatibility:GetStatus(game.GameId, game.PlaceVersion, game.PlaceId)
+```
+
+`Localization` also supports `Register`, `RegisterText`,
+`RegisterLanguageChangedListener`, `RemoveLanguageChangedListener`,
+`GetLanguageOptions`, and `ExportEnglishTemplate`. `GameCompatibility` also
+supports `LoadCached`; check the returned status before enabling
+version-sensitive features.
+
+#### FeaturePolicy
+
+Use `FeaturePolicy` to make feature and slider limits consistent with the
+active access policy:
+
+```lua
+local policy = _G.ZenixRegistry.FeaturePolicy
+
+if policy:CanUse("VehicleStats") then
+    local limit = policy:GetLimit("VehicleStats", "maxSpeed", 100)
+    applySpeedLimit(limit)
+end
+```
+
+Other policy methods include `Get`, `GetPolicy`, `Define`, `SetEnabled`,
+`SetLimit`, `Include`, `Lock`, `IsPremium`, and `GetSliderMaximum`.
+
+#### RemoteManager and FunctionHookManager
+
+These managers coordinate shared interception and hook lifecycle. Use their
+named add/remove methods and always clean up:
+
+```lua
+local remoteManager = _G.ZenixRegistry.RemoteManager
+remoteManager:EnsureInstalled()
+remoteManager:AddFilter("MyFeatureFilter", filterFunction)
+remoteManager:RemoveFilter("MyFeatureFilter")
+
+local hooks = _G.ZenixRegistry.FunctionHookManager
+hooks:EnableHook("MyFeatureHook")
+hooks:DisableHook("MyFeatureHook")
+hooks:RefreshHook("MyFeatureHook")
+```
+
+`RemoteManager` also exposes modifier, invoke-filter, callback-filter,
+caller-guard, profile, and inspection methods. `FunctionHookManager` exposes
+`AddHook`, `RemoveHook`, `GetHook`, `GetHooks`, `IsHooked`,
+`GetHookedFunctionCount`, `StartAutoScan`, `StopAutoScan`, and `Cleanup`.
+These APIs are shared infrastructure; avoid global hooks when a scoped module
+or event subscription is sufficient.
+
 Common shared services are registered on `_G.ZenixRegistry`:
 
 ```lua
