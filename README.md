@@ -269,9 +269,17 @@ through the global registry.
 
 ### Core service API
 
-Core services are exposed through `_G.ZenixRegistry` after the core component
-has loaded. Check for the service before using it when a module can run in
-different loading modes.
+Core services are initialized by the core component, but they are not all
+intended to be fetched the same way:
+
+- Use `_G.ZenixRegistry` for services explicitly published there, such as
+  `FileSystemManager`, `InstanceManager`, `GameModuleManager`, `RemoteManager`,
+  `FunctionHookManager`, `FeaturePolicy`, `Localization`, and
+  `GameCompatibility`.
+- Inside a module factory, prefer `context:getDependency("ServiceName")`.
+  This is required for services such as `EventConnectionManager` and is safer
+  for load order and testing.
+- Always validate optional services before calling them.
 
 #### FileSystemManager
 
@@ -360,11 +368,16 @@ version-sensitive features.
 
 #### FeaturePolicy
 
-Use `FeaturePolicy` to make feature and slider limits consistent with the
-active access policy:
+Define a feature policy before checking it, then use the active tier to gate
+work:
 
 ```lua
 local policy = _G.ZenixRegistry.FeaturePolicy
+
+policy:Define("VehicleStats", {
+    free = {enabled = true, maxSpeed = 100},
+    premium = {enabled = true, maxSpeed = 250},
+})
 
 if policy:CanUse("VehicleStats") then
     local limit = policy:GetLimit("VehicleStats", "maxSpeed", 100)
@@ -383,21 +396,40 @@ named add/remove methods and always clean up:
 ```lua
 local remoteManager = _G.ZenixRegistry.RemoteManager
 remoteManager:EnsureInstalled()
-remoteManager:AddFilter("MyFeatureFilter", filterFunction)
-remoteManager:RemoveFilter("MyFeatureFilter")
+if remoteManager:IsHooked() then
+    remoteManager:AddFilter("MyFeatureFilter", filterFunction)
+end
 
 local hooks = _G.ZenixRegistry.FunctionHookManager
-hooks:EnableHook("MyFeatureHook")
-hooks:DisableHook("MyFeatureHook")
-hooks:RefreshHook("MyFeatureHook")
+local scanCriteria = {
+    functions = {targetFunction},
+}
+local installed = hooks:AddHook(
+    "MyFeatureHook",
+    scanCriteria,
+    function(...)
+        return handleCall(...)
+    end,
+    {required = false, chain = false}
+)
+if installed then
+    hooks:DisableHook("MyFeatureHook")
+    hooks:EnableHook("MyFeatureHook")
+end
+
+-- Remove filters and hooks when the feature stops.
+remoteManager:RemoveFilter("MyFeatureFilter")
+hooks:RemoveHook("MyFeatureHook")
 ```
 
 `RemoteManager` also exposes modifier, invoke-filter, callback-filter,
 caller-guard, profile, and inspection methods. `FunctionHookManager` exposes
-`AddHook`, `RemoveHook`, `GetHook`, `GetHooks`, `IsHooked`,
-`GetHookedFunctionCount`, `StartAutoScan`, `StopAutoScan`, and `Cleanup`.
-These APIs are shared infrastructure; avoid global hooks when a scoped module
-or event subscription is sufficient.
+`AddHook`, `RemoveHook`, `EnableHook`, `DisableHook`, `ToggleHook`, `GetHook`,
+`GetHooks`, `IsHooked`, `GetHookedFunctionCount`, `StartAutoScan`,
+`StopAutoScan`, and `Cleanup`. `RefreshHook` and `RefreshAllHooks` are
+diagnostic stubs that return `false`; use `RemoveHook` followed by `AddHook` to
+rebuild a hook. These APIs are shared infrastructure; avoid global hooks when
+a scoped module or event subscription is sufficient.
 
 Common shared services are registered on `_G.ZenixRegistry`:
 
